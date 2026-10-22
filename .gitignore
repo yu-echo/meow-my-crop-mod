@@ -1,0 +1,14 @@
+# 编译产物
+bin/
+obj/
+*.user
+*.suo
+
+# 安装器内嵌资源（体积大，自行用 tools/make_payload.py 生成）
+installer/assets/payload.zip
+
+# 运行时/调试产物
+shots/
+meow_cmd.txt
+meow_diag.txt
+*.log
