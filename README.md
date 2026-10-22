@@ -6,6 +6,7 @@
 ![game](https://img.shields.io/badge/Meow%20My%20Crop-4201710-FF8FA8)
 ![bepinex](https://img.shields.io/badge/BepInEx-5.4.x-4B8BBE)
 ![license](https://img.shields.io/badge/license-MIT-5EA074)
+![release](https://img.shields.io/github/v/release/yu-echo/meow-my-crop-mod?color=FF8FA8)
 
 《喵了个菜! / Meow My Crop!》的单机自动化插件 —— 自动种植、自动开罐、自动合成、生长加速、按键倍率、自动兑换码。
 游戏设置页里会多出一个粉色小猪头标签页，所有开关都在那里。
@@ -15,6 +16,13 @@
 </div>
 
 ---
+
+## 下载
+
+**[山猪歪瓜 v0.4.1 —— Release 下载页](https://github.com/yu-echo/meow-my-crop-mod/releases/latest)**
+
+- `ShanZhuWaGua-v0.4.1.exe` —— 安装器，插件本体已经打包在里面，**不用另装 BepInEx**
+- `readme-zh.txt` —— 详细说明：每个开关的原理、已知限制、手动卸载方法
 
 ## 界面
 
