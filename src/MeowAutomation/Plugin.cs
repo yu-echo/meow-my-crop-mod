@@ -29,7 +29,6 @@ namespace MeowAutomation
         internal static ConfigEntry<bool> AutoCan;
         internal static ConfigEntry<bool> AutoMerge;
         internal static ConfigEntry<bool> FreeFruit;
-        internal static ConfigEntry<bool> RandomRecord;
         internal static ConfigEntry<bool> AutoRedeem;
         internal static ConfigEntry<int> KeyMultiplier;
         internal static ConfigEntry<int> GrowSpeed;
@@ -63,9 +62,8 @@ namespace MeowAutomation
         private TMP_Text multiplierText;
         private TMP_Text growText;
         private float nextTokenRefresh;
-        private int savedPlayMode = 2;
+        private bool windowFixed;
         private readonly Dictionary<string, float> redeemFailedAt = new Dictionary<string, float>();
-        private bool playModeApplied;
 
         private void Awake()
         {
@@ -77,7 +75,6 @@ namespace MeowAutomation
             AutoCan = Config.Bind("Auto", "AutoCan", false, "自动开猫罐头");
             AutoMerge = Config.Bind("Auto", "AutoMerge", false, "自动合成（5 合 1）");
             FreeFruit = Config.Bind("Auto", "FreeFruit", false, "开罐不扣果实（Steam 代币仍然会扣）");
-            RandomRecord = Config.Bind("Auto", "RandomRecord", false, "唱片随机播放（切到随机模式，没在放歌就随机起一首）");
             AutoRedeem = Config.Bind("Auto", "AutoRedeem", true, "自动兑换码（扫描兑换码表，未领取的自动兑一遍）");
             KeyMultiplier = Config.Bind("Cheat", "KeyMultiplier", 1, "按键倍率：一次按键记几次（1=原版，10/100/1000 加速成就）");
             GrowSpeed = Config.Bind("Cheat", "GrowSpeed", 1, "生长加速：作物每秒生长量翻几倍（1=原版）");
@@ -115,10 +112,10 @@ namespace MeowAutomation
 
             try
             {
-                if (!playModeApplied)
+                if (!windowFixed)
                 {
-                    playModeApplied = true;
-                    if (RandomRecord.Value) ApplyShuffle(true);
+                    windowFixed = true;
+                    ApplyWindowFix();
                 }
 
                 if (!injected) TryInjectPigTab();
@@ -171,9 +168,195 @@ namespace MeowAutomation
             }
         }
 
+        /// <summary>调试用：记住切换窗口模式前的显示设置，方便恢复。</summary>
+        private static bool displaySaved;
+        private static int savedW, savedH;
+        private static FullScreenMode savedMode;
+
+        /// <summary>
+        /// 启动自动修复：这游戏有时会进「透明桌面窗口」模式（整屏只留宠物、背景白/黑），
+        /// 房间还会被拖到屏幕角落，看起来像整个游戏白屏。启动时强制关掉透明、把房间放回中央。
+        /// </summary>
+        private void ApplyWindowFix()
+        {
+            try
+            {
+                var c = Kirurobo.UniWindowController.current;
+                if (c != null && (c.isTransparent || c.isClickThrough || c.isBottommost))
+                {
+                    c.isTransparent = false;
+                    c.isClickThrough = false;
+                    c.isBottommost = false;
+                    Diag("启动修复：已关闭透明窗口 / 点击穿透 / 置底");
+                }
+            }
+            catch (Exception e) { Diag("启动修复（窗口）失败: " + e.Message); }
+
+            try
+            {
+                var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+                foreach (var go in roots)
+                {
+                    if (go.name != "Player") continue;
+                    var p = go.transform.position;
+                    if (Mathf.Abs(p.x) < 3f && Mathf.Abs(p.y) < 3f) continue;
+                    go.transform.position = Vector3.zero;
+                    Diag($"启动修复：房间 {p} -> (0, 0, 0)");
+                }
+            }
+            catch (Exception e) { Diag("启动修复（房间）失败: " + e.Message); }
+        }
+
         private void RunCommand(string cmd)
         {
             Diag("执行命令: " + cmd);
+
+            if (cmd == "screen")
+            {
+                Diag($"Screen={Screen.width}x{Screen.height} 模式={Screen.fullScreenMode} " +
+                     $"当前={Screen.currentResolution.width}x{Screen.currentResolution.height} " +
+                     $"dpi={Screen.dpi:F0} safeArea={Screen.safeArea}");
+
+                var cams = Camera.allCameras;
+                Diag($"相机数={cams.Length}");
+                for (int i = 0; i < cams.Length && i < 8; i++)
+                {
+                    var c = cams[i];
+                    if (c == null) continue;
+                    Diag($"  相机[{i}] {c.name} rect={c.rect} pixelRect={c.pixelRect} " +
+                         $"target={(c.targetTexture != null ? c.targetTexture.width + "x" + c.targetTexture.height : "屏幕")} " +
+                         $"ortho={c.orthographic} size={c.orthographicSize:F2} depth={c.depth}");
+                }
+
+                var canvases = Resources.FindObjectsOfTypeAll<Canvas>();
+                Diag($"Canvas 总数={canvases.Length}");
+                int shown = 0;
+                foreach (var cv in canvases)
+                {
+                    if (cv == null || cv.gameObject == null) continue;
+                    if (!cv.gameObject.scene.IsValid()) continue;
+                    if (shown++ >= 12) { Diag("  ...还有更多，省略"); break; }
+                    var rt = cv.GetComponent<RectTransform>();
+                    var sc = cv.GetComponent<UnityEngine.UI.CanvasScaler>();
+                    Diag($"  Canvas {cv.name} 启用={cv.enabled} 模式={cv.renderMode} " +
+                         $"scaleFactor={cv.scaleFactor:F2} " +
+                         $"根尺寸={(rt != null ? rt.rect.width + "x" + rt.rect.height : "?")} " +
+                         $"localScale={(rt != null ? rt.localScale.ToString() : "?")} " +
+                         $"scaler={(sc != null ? sc.uiScaleMode + " ref=" + sc.referenceResolution + " match=" + sc.matchWidthOrHeight : "无")}");
+                }
+                return;
+            }
+
+            if (cmd == "fruitprobe")
+            {
+                // 验证 99 上限是否真的去掉：临时加 200，读回，再精确还原
+                var list = ConfigManager.Instance != null ? ConfigManager.Instance.tables.TbPlantConfig.DataList : null;
+                if (list == null || list.Count == 0) { Diag("拿不到作物表"); return; }
+                int id = list[0].Id;
+                int before = DataManager.Instance.GetFruitInventoryCount(id);
+                DataManager.Instance.AddFruit(id, 200);
+                int after = DataManager.Instance.GetFruitInventoryCount(id);
+                DataManager.Instance.UpdateFruitInventory(id, before);
+                Diag($"上限验证 果实{id}: 改前={before} 加200后={after} 已还原={DataManager.Instance.GetFruitInventoryCount(id)} " +
+                     $"结论={(after > 99 ? "上限已去掉" : after == 99 ? "仍然封顶 99" : "其它情况")}");
+                return;
+            }
+
+            if (cmd == "center")
+            {
+                // 房间被拖到屏幕角落（坐标系里相机看向原点），挪回中央
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    cam.transform.position = new Vector3(0f, 0f, -10f);
+                    Diag($"相机已归位 {cam.transform.position}");
+                }
+                var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+                foreach (var go in roots)
+                {
+                    if (go.name != "Player" && go.name != "Player2") continue;
+                    var was = go.transform.position;
+                    Vector3 target = go.name == "Player" ? Vector3.zero : new Vector3(-5f, 0f, 0f);
+                    go.transform.position = target;
+                    Diag($"{go.name}: {was} -> {go.transform.position}");
+                }
+                Diag("房间已归位到屏幕中央");
+                return;
+            }
+
+            if (cmd == "tree")
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                var cam = Camera.main;
+                Diag($"场景={scene.name} 根对象数={scene.rootCount} " +
+                     $"相机={(cam != null ? cam.name + " culling=" + cam.cullingMask + " 距=" + cam.nearClipPlane + "~" + cam.farClipPlane + " 位置=" + cam.transform.position + " 比例=" + cam.transform.lossyScale : "无")}");
+                int roots = 0;
+                foreach (var go in scene.GetRootGameObjects())
+                {
+                    if (roots++ > 25) { Diag("  …根对象太多，省略"); break; }
+                    var t = go.transform;
+                    Diag($"根 [{(go.activeSelf ? "开" : "关")}] {go.name} 比例={t.lossyScale} 位置={t.position} 子={t.childCount}");
+                    int n = 0;
+                    foreach (Transform c in t)
+                    {
+                        if (n++ > 6) { Diag("     …子太多"); break; }
+                        Diag($"    [{(c.gameObject.activeSelf ? "开" : "关")}] {c.name} 比例={c.localScale} 位置={c.localPosition}");
+                    }
+                }
+
+                Diag("--- 按名字搜关键对象 ---");
+                var keys = new[] { "room", "farm", "scene", "world", "ground", "background", "bg", "map", "canvas", "setting", "main", "player", "ui" };
+                int hits = 0;
+                foreach (var tr in Resources.FindObjectsOfTypeAll<Transform>())
+                {
+                    if (tr == null) continue;
+                    string nm = tr.name.ToLowerInvariant();
+                    bool hit = false;
+                    foreach (var k in keys) { if (nm.Contains(k)) { hit = true; break; } }
+                    if (!hit) continue;
+                    if (hits++ > 24) { Diag("  …命中太多，省略"); break; }
+                    Diag($"  [{(tr.gameObject.activeInHierarchy ? "开" : "关")}] {tr.name} 比例={tr.lossyScale} 位置={tr.position} 父={(tr.parent != null ? tr.parent.name : "无")}");
+                }
+                return;
+            }
+
+            if (cmd == "nowin")
+            {
+                var c = Kirurobo.UniWindowController.current;
+                if (c == null) { Diag("找不到 UniWindowController"); return; }
+                Diag($"窗口状态: 透明={c.isTransparent} 置顶={c.isTopmost} 置底={c.isBottommost} fit={c.fitToMonitorMode}");
+                c.isTransparent = false;
+                c.isBottommost = false;
+                c.isTopmost = false;
+                Diag("已关闭透明 / 置底 / 置顶");
+                return;
+            }
+
+            if (cmd == "windowed")
+            {
+                if (!displaySaved)
+                {
+                    savedW = Screen.width;
+                    savedH = Screen.height;
+                    savedMode = Screen.fullScreenMode;
+                    displaySaved = true;
+                }
+                Screen.SetResolution(1600, 900, FullScreenMode.Windowed);
+                Diag($"已切窗口模式 1600x900（原 {savedW}x{savedH} {savedMode}）");
+                return;
+            }
+
+            if (cmd == "fullscreen")
+            {
+                if (!displaySaved)
+                {
+                    Diag("没记过原始显示设置，跳过恢复");
+                    return;
+                }
+                Screen.SetResolution(savedW, savedH, savedMode);
+                Diag($"已恢复显示 {savedW}x{savedH} {savedMode}");
+                return;
+            }
 
             if (cmd.StartsWith("shot"))
             {
@@ -266,7 +449,7 @@ namespace MeowAutomation
             var best = PickLeastFruit();
             if (best == null)
             {
-                Note("所有果实都已到 99 上限，暂停补种");
+                Note("没有可补种的作物（作物表为空）");
                 nextPlant = Time.unscaledTime + 5f;
                 return;
             }
@@ -287,7 +470,6 @@ namespace MeowAutomation
             {
                 if (c == null || c.IsEventCrop != 0) continue;
                 int n = DataManager.Instance.GetFruitInventoryCount(c.Id);
-                if (n >= 99) continue;
                 if (n < bestCount || (n == bestCount && best != null && c.Id < best.Id))
                 {
                     bestCount = n;
@@ -862,8 +1044,6 @@ namespace MeowAutomation
                         "点这一行切换：×1 / ×10 / ×100，用来冲按键成就");
                 MakeRow(rowTemplate, content, "自动偷菜", AutoSteal, "MEOW_AUTO_STEAL", null,
                         "联机时自动偷邻居成熟的菜");
-                MakeRow(rowTemplate, content, "随机播放唱片", RandomRecord, "MEOW_RANDOM_RECORD", ApplyShuffle,
-                        "切到随机模式，没在放歌就随一首");
                 MakeRow(rowTemplate, content, "自动兑换码", AutoRedeem, "MEOW_AUTO_REDEEM", v =>
                 {
                     RefreshCoupons();
@@ -1453,55 +1633,6 @@ namespace MeowAutomation
         }
 
 
-        // ---------------- 唱片随机播放 ----------------
-
-        private void ApplyShuffle(bool on)
-        {
-            try
-            {
-                var dm = SingletonMono<DataManager>.Instance;
-                if (dm == null || dm.settingsData == null) return;
-
-                if (on)
-                {
-                    if (dm.settingsData.playMode != (int)PlayMode.Shuffle)
-                    {
-                        savedPlayMode = dm.settingsData.playMode;
-                        dm.settingsData.playMode = (int)PlayMode.Shuffle;
-                        dm.MarkSettingsDirty();
-                    }
-                }
-                else if (dm.settingsData.playMode == (int)PlayMode.Shuffle)
-                {
-                    dm.settingsData.playMode = savedPlayMode;
-                    dm.MarkSettingsDirty();
-                }
-
-                MessageManager.Instance().Dispatch(
-                    PlayModeChangedMessage.Create((PlayMode)dm.settingsData.playMode));
-
-                if (!on) return;
-
-                var player = FindObjectOfType<MusicPlayer>();
-                if (player != null && player.currentMusicId != -1) return;
-
-                var owned = dm.currentData != null ? dm.currentData.ownedMusicIds : null;
-                if (owned == null || owned.Count == 0) return;
-                var pool = new List<int>();
-                foreach (var m in SingletonMono<ConfigManager>.Instance.tables.TbMusicConfig.DataList)
-                    if (m.MusicType == 1 && owned.Contains(m.Id)) pool.Add(m.Id);
-                if (pool.Count == 0) return;
-
-                int pick = pool[UnityEngine.Random.Range(0, pool.Count)];
-                MessageManager.Instance().Dispatch(PlayMusicMessage.Create(pick));
-                L.LogInfo($"[唱片] 随机播放 {pick}（共 {pool.Count} 张）");
-            }
-            catch (Exception e)
-            {
-                L.LogWarning("[唱片] 切换随机播放失败：" + e.Message);
-            }
-        }
-
         // ---------------- 应急面板 ----------------
 
         private void Update()
@@ -1534,12 +1665,6 @@ namespace MeowAutomation
             {
                 AutoRedeem.Value = ar;
             }
-            bool rr = GUILayout.Toggle(RandomRecord.Value, " 随机播放唱片");
-            if (rr != RandomRecord.Value)
-            {
-                RandomRecord.Value = rr;
-                ApplyShuffle(rr);
-            }
             GUILayout.Label($"普通代币：{GetTokenCount(100002)}   活动代币：{GetTokenCount(100003)}");
             GUILayout.EndArea();
         }
@@ -1557,6 +1682,54 @@ namespace MeowAutomation
         private static class NoFruitCost
         {
             private static bool Prefix() => !Plugin.FreeFruit.Value;
+        }
+
+        // 游戏里果实库存写死 99 上限（DataManager.MAX_FRUIT_COUNT），
+        // AddFruit 与 UpdateFruitInventory 各夹一次。这里去掉夹取，让库存可以超过 99。
+        [HarmonyPatch(typeof(DataManager), "UpdateFruitInventory")]
+        private static class NoFruitCap
+        {
+            private static void Postfix(DataManager __instance, int fruitId, int quantity)
+            {
+                if (quantity <= 99) return;
+                try { ForceFruitCount(__instance, fruitId, quantity); }
+                catch { }
+            }
+        }
+
+        [HarmonyPatch(typeof(DataManager), "AddFruit")]
+        private static class NoFruitCapAdd
+        {
+            private static bool Prefix(DataManager __instance, int fruitId, int quantity)
+            {
+                try
+                {
+                    // 原版是 Mathf.Min(现有+新增, 99) 再写入，这里直接按不封顶的目标值写
+                    ForceFruitCount(__instance, fruitId, __instance.GetFruitInventoryCount(fruitId) + quantity);
+                    MessageManager.Instance().Dispatch(FruitUpdateMessage.Obtain());
+                    MessageManager.Instance().Dispatch(MarkDirtyMessage.Obtain(SaveStrategy.Immediate));
+                }
+                catch { }
+                return false;
+            }
+        }
+
+        /// <summary>绕过原版的 99 夹取，直接写库存。</summary>
+        private static void ForceFruitCount(DataManager dm, int fruitId, int quantity)
+        {
+            var data = dm.currentData;
+            if (data == null) return;
+            if (data.fruitInventory == null) data.fruitInventory = new List<FruitData>();
+            for (int i = 0; i < data.fruitInventory.Count; i++)
+            {
+                if (data.fruitInventory[i].fruitId == fruitId)
+                {
+                    if (quantity <= 0) data.fruitInventory.RemoveAt(i);
+                    else data.fruitInventory[i].quantity = quantity;
+                    return;
+                }
+            }
+            if (quantity > 0) data.fruitInventory.Add(new FruitData(fruitId, quantity));
         }
 
         [HarmonyPatch(typeof(BaseCannedItem), "CheckInventorySufficient")]

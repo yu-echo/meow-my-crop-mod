@@ -49,6 +49,10 @@
       <HintPath>$(GameDir)\MeowMyCrop_Data\Managed\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Kirurobo.UniWindowController">
+      <HintPath>$(GameDir)\MeowMyCrop_Data\Managed\Kirurobo.UniWindowController.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(GameDir)\MeowMyCrop_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>

@@ -17,7 +17,7 @@
 
 ## 自动种植 / 自动开罐 / 自动合成
 
-- 种植：扫描自己的地块，找库存最少且不到 99 的果实补种；期间临时屏蔽游戏自带的续种逻辑，避免抢种。
+- 种植：扫描自己的地块，找库存最少的果实补种（果实上限 99 已去掉）；期间临时屏蔽游戏自带的续种逻辑，避免抢种。
 - 开罐：直接调 `BaseCannedItem.ExchangeCannedItem()`，和手点按钮走同一条路径。开罐消耗
   3+3 果实 + 1 代币，没有冷却；代币按 `tPoolConfig.TokenId` 读，用完即停。
 - 合成：`SyntheticUI` 的「填满 + 合成」，5 件同品质合 1 件，跳过传说级和 Default/Promo 池。
@@ -91,3 +91,12 @@ public void Grow(float val, bool isClickGrowth = false)
 插件不依赖任何 GameObject 生命周期（宿主对象在首个场景加载时会被销毁）。它往
 `PlayerLoop` 的 Update 阶段插了一个自己的子系统，并在判空时用 `ReferenceEquals`
 绕开 Unity 重载的 `==`（假 null）。
+
+## 启动自动修复
+
+游戏本身是「桌面宠物」模式（Kirurobo 透明窗口），某些场景会把窗口切成
+`WS_EX_LAYERED + WS_EX_TRANSPARENT`（点击穿透）并把房间对象拖到世界坐标原点之外，
+结果就是屏幕只剩白/黑底。插件启动后自动执行一次修复：
+
+1. **窗口** —— 关闭 isTransparent / isClickThrough / isBottommost，恢复正常窗口。
+2. **房间** —— 把 Player 对象归位到世界坐标 (0, 0, 0)。
