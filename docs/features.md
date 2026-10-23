@@ -92,11 +92,25 @@ public void Grow(float val, bool isClickGrowth = false)
 `PlayerLoop` 的 Update 阶段插了一个自己的子系统，并在判空时用 `ReferenceEquals`
 绕开 Unity 重载的 `==`（假 null）。
 
-## 启动自动修复
+## 库存 / 代币为 0 的排查（Steam自启动）
 
-游戏本身是「桌面宠物」模式（Kirurobo 透明窗口），某些场景会把窗口切成
-`WS_EX_LAYERED + WS_EX_TRANSPARENT`（点击穿透）并把房间对象拖到世界坐标原点之外，
-结果就是屏幕只剩白/黑底。插件启动后自动执行一次修复：
+游戏设置里的「Steam自启动」会在开机时直接把 `MeowMyCrop.exe` 拉起来，不经过 Steam。
+游戏只在启动那一瞬间调一次 `SteamAPI_Init()`，此时 Steam 还没就绪 → 失败，
+且**整局不会重试**，于是所有依赖 Steam 的功能全部失效：库存空、代币 0、
+开罐头无效、兑换码全废。
 
-1. **窗口** —— 关闭 isTransparent / isClickThrough / isBottommost，恢复正常窗口。
-2. **房间** —— 把 Player 对象归位到世界坐标 (0, 0, 0)。
+判断：插件面板代币显示 0、兑换码「已领 0/N」。
+解决：关掉「Steam自启动」→ 完全退出 → 从 Steam 库启动。
+
+生长加速 / 按键倍率走 Harmony 改本地数值，不受影响 —— 这也是「倍率有效但库存空」
+这个典型现象的来源。
+
+## 兑换码为什么会误报「兑换成功」
+
+旧实现只看 `GetItemCount(id) > 0` 就判定成功。但游戏自己的促销系统（AddPromoItem）
+也会往同一个物品 ID 里发货，于是已领过的码每次启动都被当成新兑换，弹出
+「这轮自动兑换到 N 个码」。
+
+现在改成：调用前记下 `GetItemCount`，调用后只在**数量真的增加**时才算成功。
+另外记住兑换码表的条目数 `lastCouponTableCount`，表没有新增条目就不再重复扫描，
+等官方发了新码才启动新一轮。

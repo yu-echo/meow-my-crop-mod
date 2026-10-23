@@ -19,10 +19,26 @@
 
 ## 下载
 
-**[山猪歪瓜 v0.4.2 —— Release 下载页](https://github.com/yu-echo/meow-my-crop-mod/releases/latest)**
+**[山猪歪瓜 v0.4.3 —— Release 下载页](https://github.com/yu-echo/meow-my-crop-mod/releases/latest)**
 
-- `ShanZhuWaGua-v0.4.2.exe` —— 安装器，插件本体已经打包在里面，**不用另装 BepInEx**
+- `ShanZhuWaGua-v0.4.3.exe` —— 安装器，插件本体已经打包在里面，**不用另装 BepInEx**
 - `readme-zh.txt` —— 详细说明：每个开关的原理、已知限制、手动卸载方法
+
+> ## ⚠️ 装完请先关掉游戏里的「Steam自启动」
+>
+> 游戏设置页里有个 **「Steam自启动」** 开关，装了插件之后**请把它关掉**。
+>
+> 这个开关会在开机时直接把游戏拉起来（不经过 Steam）。游戏只在启动那一瞬间
+> 向 Steam 请求一次库存，此时 Steam 还没启动完成，请求失败后**整局都不会再重试**。
+>
+> 症状（等多久都不会自己好）：
+> - 游戏内库存全空、代币显示 0
+> - 手动开罐头没反应
+> - 自动兑换码全部失效、插件代币面板一直是 0
+>
+> 恢复方法：关掉「Steam自启动」→ 完全退出游戏 → **从 Steam 库点「开始游戏」**。
+>
+> 生长加速、按键倍率不受影响（改的是本地数值，不碰 Steam）。
 
 ## 界面
 

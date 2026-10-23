@@ -19,7 +19,7 @@ using UnityEngine.UI;
 
 namespace MeowAutomation
 {
-    [BepInPlugin(Guid, "Meow Automation", "0.4.1")]
+    [BepInPlugin(Guid, "Meow Automation", "0.4.3")]
     public class Plugin : BaseUnityPlugin
     {
         public const string Guid = "echo.meow.automation";
@@ -62,7 +62,6 @@ namespace MeowAutomation
         private TMP_Text multiplierText;
         private TMP_Text growText;
         private float nextTokenRefresh;
-        private bool windowFixed;
         private readonly Dictionary<string, float> redeemFailedAt = new Dictionary<string, float>();
 
         private void Awake()
@@ -90,7 +89,7 @@ namespace MeowAutomation
 
             DumpEnv();
 
-            L.LogInfo("Meow Automation 0.4.1 已加载");
+            L.LogInfo("Meow Automation 0.4.3 已加载");
         }
 
         private float nextTick;
@@ -112,12 +111,6 @@ namespace MeowAutomation
 
             try
             {
-                if (!windowFixed)
-                {
-                    windowFixed = true;
-                    ApplyWindowFix();
-                }
-
                 if (!injected) TryInjectPigTab();
 
                 if (AutoFarm.Value) DoFarm();
@@ -172,40 +165,6 @@ namespace MeowAutomation
         private static bool displaySaved;
         private static int savedW, savedH;
         private static FullScreenMode savedMode;
-
-        /// <summary>
-        /// 启动自动修复：这游戏有时会进「透明桌面窗口」模式（整屏只留宠物、背景白/黑），
-        /// 房间还会被拖到屏幕角落，看起来像整个游戏白屏。启动时强制关掉透明、把房间放回中央。
-        /// </summary>
-        private void ApplyWindowFix()
-        {
-            try
-            {
-                var c = Kirurobo.UniWindowController.current;
-                if (c != null && (c.isTransparent || c.isClickThrough || c.isBottommost))
-                {
-                    c.isTransparent = false;
-                    c.isClickThrough = false;
-                    c.isBottommost = false;
-                    Diag("启动修复：已关闭透明窗口 / 点击穿透 / 置底");
-                }
-            }
-            catch (Exception e) { Diag("启动修复（窗口）失败: " + e.Message); }
-
-            try
-            {
-                var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-                foreach (var go in roots)
-                {
-                    if (go.name != "Player") continue;
-                    var p = go.transform.position;
-                    if (Mathf.Abs(p.x) < 3f && Mathf.Abs(p.y) < 3f) continue;
-                    go.transform.position = Vector3.zero;
-                    Diag($"启动修复：房间 {p} -> (0, 0, 0)");
-                }
-            }
-            catch (Exception e) { Diag("启动修复（房间）失败: " + e.Message); }
-        }
 
         private void RunCommand(string cmd)
         {
@@ -420,6 +379,45 @@ namespace MeowAutomation
                 if (menu == null) { Diag("没找到 MenuUI"); return; }
                 if (!menu.gameObject.activeInHierarchy) menu.Show();
                 menu.SwitchUI(menu.settingUI);
+                return;
+            }
+
+            if (cmd == "tokenprobe")
+            {
+                try
+                {
+                    var mgr = SteamInventoryManager.Instance;
+                    if (mgr == null) { Diag("tokenprobe: SteamInventoryManager.Instance == null"); return; }
+                    var all = mgr.GetAllItems();
+                    if (all == null) { Diag("tokenprobe: GetAllItems() == null"); return; }
+                    Diag($"tokenprobe: 条目数={all.Count}");
+                    foreach (var kv in all)
+                        Diag($"  ID={kv.Key} 数量={kv.Value}");
+                    Diag($"tokenprobe: GetTokenCount(100002)={GetTokenCount(100002)}  GetTokenCount(100003)={GetTokenCount(100003)}");
+                }
+                catch (Exception e) { Diag("tokenprobe 失败: " + e); }
+                return;
+            }
+
+            if (cmd == "uirefresh")
+            {
+                try
+                {
+                    int rawNormal = GetTokenCount(100002);
+                    int rawEvent = GetTokenCount(100003);
+                    Diag($"uirefresh: raw normal={rawNormal} event={rawEvent}");
+                    Diag($"uirefresh: tokenNormalText={(tokenNormalText == null ? "null" : "ok")} tokenEventText={(tokenEventText == null ? "null" : "ok")}");
+                    if (tokenNormalText != null)
+                        Diag($"uirefresh: normalText.text=[{tokenNormalText.text}]");
+                    if (tokenEventText != null)
+                        Diag($"uirefresh: eventText.text=[{tokenEventText.text}]");
+                    RefreshTokens();
+                    if (tokenNormalText != null)
+                        Diag($"uirefresh AFTER: normalText.text=[{tokenNormalText.text}]");
+                    if (tokenEventText != null)
+                        Diag($"uirefresh AFTER: eventText.text=[{tokenEventText.text}]");
+                }
+                catch (Exception e) { Diag("uirefresh 失败: " + e); }
                 return;
             }
         }
@@ -1529,9 +1527,11 @@ namespace MeowAutomation
         private List<tCouponCode> redeemQueue;
         private int redeemIndex;
         private tCouponCode redeemPending;
+        private int redeemPendingBefore;
         private int redeemOk;
         private float nextRedeemAt;
         private float nextRedeemPassAt;
+        private int lastCouponTableCount = -1;
 
         private void TickRedeem()
         {
@@ -1546,19 +1546,19 @@ namespace MeowAutomation
             var mgr = SteamInventoryManager.Instance;
             if (mgr == null) return;
 
-            // 先看上一次请求有没有到账
+            // 先看上一次请求有没有到账（对比兑换前后的物品数量）
             if (redeemPending != null)
             {
-                if (mgr.GetItemCount(redeemPending.Id) > 0)
+                int after = mgr.GetItemCount(redeemPending.Id);
+                if (after > redeemPendingBefore)
                 {
                     redeemFailedAt.Remove(redeemPending.Key);
-                    L.LogInfo($"[兑换码] ✓ {redeemPending.Key} 兑换成功");
+                    L.LogInfo($"[兑换码] ✓ {redeemPending.Key} 兑换成功（{redeemPendingBefore}→{after}）");
                     redeemOk++;
                 }
                 else
                 {
-                    redeemFailedAt[redeemPending.Key] = now;
-                    L.LogInfo($"[兑换码] {redeemPending.Key} 没换成（大概活动已结束），30 分钟内不再试");
+                    L.LogInfo($"[兑换码] {redeemPending.Key} 跳过（数量未增加 {redeemPendingBefore}→{after}，可能是游戏促销或已领过）");
                 }
                 redeemPending = null;
                 RefreshCoupons();
@@ -1569,10 +1569,15 @@ namespace MeowAutomation
             if (redeemQueue == null)
             {
                 if (now < nextRedeemPassAt) return;
-                nextRedeemPassAt = now + 60f;
 
                 var list = CouponList();
                 if (list == null || list.Count == 0 || mgr.GetAllItems() == null) return;
+
+                // 兑换码表没有新增条目就不再扫
+                if (list.Count == lastCouponTableCount) return;
+
+                nextRedeemPassAt = now + 60f;
+                lastCouponTableCount = list.Count;
 
                 redeemQueue = new List<tCouponCode>();
                 // 表按下发顺序排，新的在后面，从后往前试
@@ -1604,6 +1609,7 @@ namespace MeowAutomation
             nextRedeemAt = now + 2.5f;
             try
             {
+                redeemPendingBefore = mgr.GetItemCount(cur.Id);
                 mgr.AddPromoItem(cur.Id);
                 redeemPending = cur;
             }
